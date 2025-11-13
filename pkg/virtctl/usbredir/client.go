@@ -27,6 +27,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"regexp"
 	"time"
 
 	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
@@ -169,7 +170,29 @@ func (k *Client) proxyUSBRedir() {
 	}()
 }
 
+// validateUSBDevice validates that the device string is in expected format
+// to prevent command injection vulnerabilities. Valid formats are:
+// - vendor:product (e.g., "0951:1666")
+// - bus-device (e.g., "02-03")
+func validateUSBDevice(device string) error {
+	// Match vendor:product format (4 hex digits : 4 hex digits)
+	vendorProductPattern := regexp.MustCompile(`^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$`)
+	// Match bus-device format (2-3 digits - 2-3 digits)
+	busDevicePattern := regexp.MustCompile(`^\d{2,3}-\d{2,3}$`)
+
+	if vendorProductPattern.MatchString(device) || busDevicePattern.MatchString(device) {
+		return nil
+	}
+
+	return fmt.Errorf("invalid USB device format: %s (expected vendor:product like '0951:1666' or bus-device like '02-03')", device)
+}
+
 func clientConnect(ctx context.Context, device, address string) error {
+	// Validate the device parameter to prevent command injection
+	if err := validateUSBDevice(device); err != nil {
+		return err
+	}
+
 	bin := usbredirClient
 	args := []string{}
 	args = append(args, "--device", device, "--to", address)
